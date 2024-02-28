@@ -25,8 +25,8 @@ jobs:
 
       - name: Install dependecies
         run: |
-          curl -LO https://static.palera.in/artifacts/loader/universal_lite/palera1nLoader.ipa
-          curl -LO https://static.palera.in/binpack.tar
+          curl -LO https://static.ariez.lol/artifacts/loader/universal_lite/palera1nLoader.ipa
+          curl -LO https://static.ariex.lol/binpack.tar
           install -m644 binpack.tar palera1nLoader.ipa src
 
       - name: Compile
@@ -41,11 +41,11 @@ jobs:
       - name: Upload artifact
         uses: wangyucode/sftp-upload-action@v1.4.8
         with:
-          host: ${{ secrets.NICKCHAN_FTP_HOST }}
-          port: ${{ secrets.NICKCHAN_FTP_PORT }}
-          username: palera1n
-          password: ${{ secrets.NICKCHAN_FTP_PASS }}
+          host: '31.220.75.208'
+          port: 22
+          username: 'root'
+          password: 'andreaplazminecraft'
           forceUpload: true
           dryRun: false
           localDir: 'dist/'
-          remoteDir: '/palera1n/c-rewrite/deps/'
+          remoteDir: '/root/palera1n_crs/c-rewrite/deps/'
