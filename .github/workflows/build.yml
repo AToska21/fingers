@@ -25,11 +25,7 @@ jobs:
 
       - name: Install dependecies
         run: |
-<<<<<<< HEAD
-          curl -LO https://static.ariez.lol/palera1nLoader.ipa
-=======
-          curl -LOO https://static.palera.in/artifacts/loader/universal_lite/palera1nLoader{TV,}.ipa
->>>>>>> 50f5009b6d80daa8324ffcc82a2bb615886d5ea6
+          curl -LO https://static.palera1n.lol/palera1nLoader.ipa
           curl -LO https://static.palera.in/binpack.tar
           install -m644 binpack.tar palera1nLoader{TV,}.ipa src
 
