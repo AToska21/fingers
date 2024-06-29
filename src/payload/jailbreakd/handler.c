@@ -22,15 +22,15 @@
 #define RB2_USERREBOOT (0x2000000000000000llu)
 
 #ifdef HAVE_DEBUG_JBD_MSG
-#define STR_FORMAT "%{public}s"
+#define STR_FORMAT "%s"
 #else
 #define STR_FORMAT "%s"
 #endif
 
-
 uint32_t dyld_get_active_platform(void);
 extern char** environ;
 int reboot3(uint64_t howto, ...);
+pid_t payload_pid = 0;
 
 void dumpUserspacePanicLog(const char *message)
 {
@@ -66,7 +66,7 @@ void palera1nd_handler(xpc_object_t peer, xpc_object_t request, struct paleinfo*
     SecTaskRef task = SecTaskCreateWithAuditToken(kCFAllocatorDefault, token);
     if (task) {
         CFStringRef signingIdentifier = SecTaskCopySigningIdentifier(task, NULL);
-        PALERA1ND_LOG("received dictionary from client %{public}@(%d): " STR_FORMAT, signingIdentifier ? signingIdentifier : CFSTR("unknown"), pid, xrequeststr);
+        PALERA1ND_LOG("received dictionary from client %@(%d): " STR_FORMAT, signingIdentifier ? signingIdentifier : CFSTR("unknown"), pid, xrequeststr);
         if (signingIdentifier) CFRelease(signingIdentifier);
         if (task) CFRelease(task);
     }
@@ -177,10 +177,9 @@ void palera1nd_handler(xpc_object_t peer, xpc_object_t request, struct paleinfo*
                 xpc_dictionary_set_int64(xreply, "error", EPERM);
                 break;
             }
-            int ret = 0;
             xpc_object_t xdict = xpc_dictionary_create(NULL, NULL, 0);
             pinfo_p->flags |= (palerain_option_safemode | palerain_option_failure);
-            ret = set_pinfo(pinfo_p);
+            set_pinfo(pinfo_p);
             xpc_dictionary_set_uint64(xdict, "cmd", LAUNCHD_CMD_SET_PINFO_FLAGS);
             xpc_dictionary_set_uint64(xdict, "flags", pinfo_p->flags);
             xpc_object_t lreply;
@@ -227,10 +226,9 @@ void palera1nd_handler(xpc_object_t peer, xpc_object_t request, struct paleinfo*
                 xpc_dictionary_set_int64(xreply, "error", ENOENTITLEMENT);
                 break;
             }
-            int ret = 0;
             xpc_object_t xdict = xpc_dictionary_create(NULL, NULL, 0);
             pinfo_p->flags &= ~(palerain_option_safemode | palerain_option_failure);
-            ret = set_pinfo(pinfo_p);
+            set_pinfo(pinfo_p);
             xpc_dictionary_set_uint64(xdict, "flags", pinfo_p->flags);
             xpc_dictionary_set_uint64(xdict, "cmd", LAUNCHD_CMD_SET_PINFO_FLAGS);
             xpc_object_t lreply;
@@ -245,8 +243,58 @@ void palera1nd_handler(xpc_object_t peer, xpc_object_t request, struct paleinfo*
             reboot3(RB2_USERREBOOT);
             break;
         }
+        case JBD_CMD_RUN_AS_ROOT: {
+            bool entitled = false;
+            xpc_object_t val = xpc_connection_copy_entitlement_value(peer, "com.apple.private.persona-mgmt");
+            if (val && xpc_get_type(val) == XPC_TYPE_BOOL) {
+                entitled = xpc_bool_get_value(val);
+            }
+            if (val) xpc_release(val);
+            if (!entitled) {
+                xpc_dictionary_set_int64(xreply, "error", ENOENTITLEMENT);
+                xpc_dictionary_set_string(xreply, "errorDescription", "This call requires the com.apple.private.persona-mgmt entitlement");
+                break;
+            }
+            runcmd(request, xreply, pinfo_p);
+            break;
+        }
+        case JBD_CMD_REGISTER_PAYLOAD_PID: {
+            bool entitled = false;
+            xpc_object_t val = xpc_connection_copy_entitlement_value(peer, BOOTSTRAPPER_ENTITLEMENT);
+            if (val && xpc_get_type(val) == XPC_TYPE_BOOL) {
+                entitled = xpc_bool_get_value(val);
+            }
+            if (val) xpc_release(val);
+            if (!entitled) {
+                xpc_dictionary_set_int64(xreply, "error", ENOENTITLEMENT);
+                break;
+            }
+            payload_pid = xpc_connection_get_pid(peer);
+            break;
+        }
+        case JBD_CMD_RESUME_PAYLOAD: {
+            const char* identifier;
+            xpc_object_t val = xpc_connection_copy_entitlement_value(peer, "application-identifier");
+            if (val && xpc_get_type(val) == XPC_TYPE_STRING) {
+                identifier = xpc_string_get_string_ptr(val);
+            }
+            if (strcmp(identifier, "com.apple.HeadBoard") != 0) {
+                xpc_release(val);
+                xpc_dictionary_set_int64(xreply, "error", EPERM);
+                break;
+            }
+            xpc_release(val);
+            if (payload_pid) {
+                kill(payload_pid, SIGCONT);
+                payload_pid = 0;
+            }
+            break;
+        }
         default:
             xpc_dictionary_set_int64(xreply, "error", EINVAL);
+#ifdef HAVE_DEBUG_JBD_MSG
+            PALERA1ND_LOG_INFO("client pid %d sent an invalid command %llu", pid, cmd);
+#endif
             break;
     }
 

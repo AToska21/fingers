@@ -17,7 +17,9 @@
 #include <sys/kern_memorystatus.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <removefile.h>
+#include <sys/snapshot.h>
 #include <copyfile.h>
+#include <sys/mount.h>
 
 #include <sys/stat.h>
 
@@ -43,11 +45,6 @@
 
 extern char** environ;
 
-struct nslog_stderr_info {
-    const char* desc;
-    int fd;
-};
-
 void* write_log(void* arg) {
     int fd = ((struct nslog_stderr_info*)arg)->fd;
     ssize_t didRead;
@@ -56,7 +53,7 @@ void* write_log(void* arg) {
 
     while ((didRead = read(fd, buf, 0x1000)) != -1) {
         if (didRead > 0) {
-            PALERA1ND_LOG("%{public}s: %{public}s", ((struct nslog_stderr_info*)arg)->desc, buf);
+            PALERA1ND_LOG("%s: %s", ((struct nslog_stderr_info*)arg)->desc, buf);
             memset(buf, 0, 0x1000);
         }
     }
@@ -75,6 +72,9 @@ void bootstrap(xpc_object_t xrequest, xpc_object_t xreply, struct paleinfo* pinf
     
     if (pinfo->flags & palerain_option_rootful) {
         BOOTSTRAP_ASSURE(access("/.procursus_strapped", F_OK) != 0, EEXIST, "Already Bootstrapped");
+        struct statfs fs;
+        BOOTSTRAP_ASSURE(statfs("/", &fs) == 0, errno, "statfs(/) failed");
+        BOOTSTRAP_ASSURE(strstr(fs.f_mntfromname, "@/dev") == NULL, ENOTSUP, "cannot bootstrap since we rooted from snapshot %s", fs.f_mntfromname);
     } else {
         char existingPath[150] = {'\0'};
         int prebootpath_ret  = jailbreak_get_prebootPath(existingPath);
@@ -104,6 +104,18 @@ void bootstrap(xpc_object_t xrequest, xpc_object_t xreply, struct paleinfo* pinf
     
     ret = remount_func(&name);
     BOOTSTRAP_ASSURE(ret == 0, errno, "remount failed");
+    
+    if ((pinfo->flags & palerain_option_ssv) == 0) {
+        char hash[97], snapshotName[150];
+        BOOTSTRAP_ASSURE(jailbreak_get_bmhash(hash) == 0, errno, "could not get boot-manifest-hash");
+        snprintf(snapshotName, 150, "com.apple.os.update-%s", hash);
+        int dirfd = open("/", O_RDONLY, 0);
+        ret = fs_snapshot_rename(dirfd, snapshotName, "orig-fs", 0);
+        if (ret != 0) {
+            BOOTSTRAP_ASSURE(errno == 2, errno, "fs_snapshot_rename failed");
+        }
+        close(dirfd);
+    }
     
     char tarPath[150];
     if (pinfo->flags & palerain_option_rootful) {
@@ -235,7 +247,7 @@ pthread_join(tarLogThread, NULL); \
     JOIN_TAR_ZSTD;
     
 #define REMOVE_TPATH do { \
-if ((pinfo->flags & palerain_option_rootless) && strlen(tarPath) > 118); \
+if ((pinfo->flags & palerain_option_rootless) && strstr(tarPath, "/jb-")); \
 removefile(tarPath, NULL, REMOVEFILE_RECURSIVE);\
 } while(0)
     
@@ -256,7 +268,7 @@ removefile(tarPath, NULL, REMOVEFILE_RECURSIVE);\
         ret = rename(bootstrapExtractedPath, finalBootstrapPath);
         PALERA1ND_LOG_INFO("rename %s -> %s", bootstrapExtractedPath, finalBootstrapPath);
         
-        if (strlen(tarPath) > 118)
+        if (strstr(tarPath, "/jb-"))
             rmdir(extrationVarPath);
         
         BOOTSTRAP_ASSURE_F_CLEANUP(ret, REMOVE_TPATH, errno, "rename %s -> %s failed", bootstrapExtractedPath, finalBootstrapPath);
@@ -466,6 +478,7 @@ pthread_join(prepBootstrapStdOutLogThread, NULL); \
 
     PALERA1ND_LOG("loading %s", launch_path);
     ret = bootstrap_cmd(&msg, 3, (char*[]){ "bootstrap", "system", launch_path, NULL }, environ, (char*[]){ NULL });
+    xpc_release(msg);
 
     PALERA1ND_LOG("bootstrap_cmd returned %d", ret);
 

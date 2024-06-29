@@ -1,4 +1,6 @@
 CFLAGS += -g -arch arm64 -I$(ROOT)/include -Wno-deprecated-declarations
+CFLAGS += -Wall -Wextra
+
 SHELL = /usr/bin/env bash
 
 ifneq ($(ASAN),1)
@@ -18,6 +20,8 @@ CFLAGS += -O0 -DDEV_BUILD=1 -DHAVE_DEBUG_SHELL=1 -DHAVE_DEBUG_JBD_MSG=1
 else
 CFLAGS += -Oz -flto=full
 endif
+
+CFLAGS += -DFAKEDYLD_ENABLE_LOGGING
 
 export CFLAGS
 
@@ -50,7 +54,7 @@ ramdisk.dmg: $(patsubst %, %-all, $(SUBDIRS))
 	rm -rf ramdisk.dmg ramdisk
 	mkdir -p ramdisk/{sbin,usr/lib,dev,binpack,fs/{real,fake},cores}
 	install -m755 fakedyld/dyld ramdisk/
-	install -m755 mount_cores/mount_cores.[0-9] ramdisk/
+	#install -m755 mount_cores/mount_cores.[0-9] ramdisk/
 	install -m755 payload_dylib/payload.dylib ramdisk/
 	install -m755 payload/payload ramdisk/
 ifeq ($(INCLUDE_ASAN),1)
@@ -77,15 +81,28 @@ else
 endif
 	rm -rf palera1nLoader
 
-binpack.dmg: binpack.tar loader.dmg $(patsubst %, %-all, $(SUBDIRS))
+tvloader.dmg: palera1nLoaderTV.ipa
+	rm -rf loader.dmg palera1nLoaderTV
+	mkdir palera1nLoaderTV
+	cd palera1nLoaderTV && unzip ../palera1nLoaderTV.ipa
+	$(call CREATE_UDRW_IMAGE,tvloader.img,2,palera1nLoaderTV,palera1nLoaderTV/Payload)
+ifeq ($(MAC),1)
+	hdiutil convert -format ULFO tvloader.img -o tvloader.dmg
+else
+	$(DMG) dmg tvloader.img tvloader.dmg -zlib-level 9
+endif
+	rm -rf palera1nLoaderTV
+
+binpack.dmg: binpack.tar loader.dmg tvloader.dmg $(patsubst %, %-all, $(SUBDIRS))
 	rm -rf binpack.dmg binpack.img binpack
 	mkdir binpack
 	touch binpack/.installed_overlay
 	tar -C binpack --preserve-permissions -xf binpack.tar
-	rm -rf binpack/usr/share cores
+	rm -rf binpack/usr/share binpack/private cores
 	mkdir -p binpack/Applications
 	mkdir -p binpack/usr/lib binpack/usr/share binpack/usr/lib/libroot
 	mkdir -p binpack/Library/Frameworks/CydiaSubstrate.framework
+	mkdir -p binpack/Library/Frameworks/CydiaSubstrateBridgeOS.framework
 	mkdir -p binpack/Library/LaunchDaemons
 	ln -sf ../../../payload binpack/usr/sbin/p1ctl
 	ln -sf ../../../payload binpack/usr/sbin/palera1nd
@@ -96,13 +113,14 @@ binpack.dmg: binpack.tar loader.dmg $(patsubst %, %-all, $(SUBDIRS))
 	cp -a $(ROOT)/shared/copyright binpack/usr/share
 	cp -a $(ROOT)/LICENSE binpack/usr/share/copyright/Licnese-plinit.txt
 	chmod 644 binpack/Library/LaunchDaemons/*.plist
-	cp rootlesshooks/rootlesshooks.dylib binpack/usr/lib
-	cp rootfulhooks/rootfulhooks.dylib binpack/usr/lib
 	cp systemhook/systemhook.dylib binpack/usr/lib
 	cp universalhooks/universalhooks.dylib binpack/usr/lib
+	cp bridgehook/bridgehook.dylib binpack/usr/lib
 	cp loader.dmg binpack
+	cp tvloader.dmg binpack
 	cp ellekit/ellekit_build/Build/Products/Release-iphoneos/libellekit.dylib binpack/usr/lib
 	ln -s ../../../usr/lib/libellekit.dylib binpack/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate
+	ln -s ../../../usr/lib/bridgehook.dylib binpack/Library/Frameworks/CydiaSubstrateBridgeOS.framework/CydiaSubstrate
 	$(call CREATE_UDRW_IMAGE,binpack.img,10,plooshra1nfs,binpack)
 ifeq ($(MAC),1)
 	hdiutil convert -format UDZO -imagekey zlib-level=9 binpack.img -o binpack.dmg

@@ -42,7 +42,7 @@ void notch_clear(char* machine) {
     }
 }
 
-int copyfile_fakefs_cb(int what, int stage, copyfile_state_t state, const char * src, const char * dst, void * ctx) {
+int copyfile_fakefs_cb(int what, int __unused stage, copyfile_state_t __unused state, const char * src, const char * __unused dst, void * ctx) {
     char basename_buf[PATH_MAX];
     struct paleinfo* pinfo_p = ((struct cb_context*)ctx)->pinfo_p;
     switch (what) {
@@ -100,22 +100,20 @@ int copyfile_fakefs_cb(int what, int stage, copyfile_state_t state, const char *
 
 }
 
-int setup_fakefs(uint32_t payload_options, struct paleinfo* pinfo_p) {
+int setup_fakefs(uint32_t __unused payload_options, struct paleinfo* pinfo_p) {
     CHECK_ERROR(runCommand((char*[]){ "/sbin/fsck", "-qL", NULL }), 1, "fsck failed");
 
     struct statfs rootfs_st;
     CHECK_ERROR(statfs("/", &rootfs_st), 1, "statfs / failed");
     if (strcmp(rootfs_st.f_fstypename, "apfs")) {
-        fprintf(stderr, "unexpected filesystem type of /\n");
-        spin();
+        panic("unexpected filesystem type of /");
     }
-    
+
     char fakefs_mntfromname[50];
     snprintf(fakefs_mntfromname, 50, "/dev/%s", pinfo_p->rootdev);
 
     if (access(fakefs_mntfromname, F_OK) == 0) {
-        fprintf(stderr, "fakefs already exists\n");
-        spin();
+        panic("fakefs already exists");
     }
 
     struct cb_context context = { .pinfo_p = pinfo_p, .bytesToCopy = 0 };
@@ -131,11 +129,10 @@ int setup_fakefs(uint32_t payload_options, struct paleinfo* pinfo_p) {
 
         context.bytesToCopy = attrbuf.spaceused;
         if ((attrbuf.spaceused + MINIMUM_EXTRA_SPACE) > (rootfs_st.f_bavail * rootfs_st.f_bsize)) {
-            fprintf(stderr, "Not enough space! need %lld bytes (%d bytes buffer), have %lld bytes.\n", (attrbuf.spaceused + MINIMUM_EXTRA_SPACE), MINIMUM_EXTRA_SPACE, (rootfs_st.f_bavail * rootfs_st.f_bsize));
-            spin();
+            panic("Not enough space! need %lld bytes (%d bytes buffer), have %lld bytes.`", (attrbuf.spaceused + MINIMUM_EXTRA_SPACE), MINIMUM_EXTRA_SPACE, (rootfs_st.f_bavail * rootfs_st.f_bsize));
         }
     }
-    
+
     CHECK_ERROR(mount("bindfs", "/cores/fs/real", MNT_RDONLY, "/"), 1, "mount_bindfs(/ -> /cores/fs/real) failed");
 
     CFMutableDictionaryRef dict = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -145,7 +142,21 @@ int setup_fakefs(uint32_t payload_options, struct paleinfo* pinfo_p) {
     CFDictionaryAddValue(dict, kAPFSVolumeNameKey, CFSTR("Xystem"));
     CFDictionaryAddValue(dict, kAPFSVolumeCaseSensitiveKey, kCFBooleanTrue);
 
-    CHECK_ERROR(APFSVolumeCreate("disk0s1", dict), 1, "APFSVolumeCreate failed");
+    const char* container = "disk0s1";
+    char container_impl[16];
+    if (strncmp(pinfo_p->rootdev, "disk0", 5) != 0) {
+        strncpy(container_impl, pinfo_p->rootdev, 5);
+        container_impl[5] = '\0';
+        container = container_impl;
+    }
+
+    printf("container=%s\n", container);
+
+    int retval = APFSVolumeCreate(container, dict);
+    if (retval) {
+        panic("APFSVolumeCreate failed: %d: %s\n", retval, mach_error_string(retval));
+    }
+
     char actual_fakefs_mntfromname[50];
     int32_t fsindex;
     CFNumberGetValue(CFDictionaryGetValue(dict, kAPFSVolumeFSIndexKey), kCFNumberSInt32Type, &fsindex);
@@ -157,17 +168,14 @@ int setup_fakefs(uint32_t payload_options, struct paleinfo* pinfo_p) {
     } else if (strstr(rootfs_st.f_mntfromname, "/dev/disk1s") != NULL) {
         snprintf(actual_fakefs_mntfromname, 50, "/dev/disk1s%d", fsindex+1);
     } else {
-        fprintf(stderr, "unexpected rootfs f_mntfromname %s\n", rootfs_st.f_mntfromname);
-        spin();
+        panic("unexpected rootfs f_mntfromname %s", rootfs_st.f_mntfromname);
     }
     if (strcmp(actual_fakefs_mntfromname, fakefs_mntfromname)) {
-        fprintf(stderr, "unexpected fakefs name %s (expected %s)\n", actual_fakefs_mntfromname, fakefs_mntfromname);
-        spin();
+        panic("unexpected fakefs name %s (expected %s)", actual_fakefs_mntfromname, fakefs_mntfromname);
     }
     sleep(2);
     struct apfs_mount_args args = {
-        fakefs_mntfromname, 0, APFS_MOUNT_FILESYSTEM, 0
-    };
+        fakefs_mntfromname, 0, APFS_MOUNT_FILESYSTEM, 0, 0, { "" }, NULL, 0, 0, NULL, 0, 0, 0, 0, 0, 0 };
     CHECK_ERROR(mount("apfs", "/cores/fs/fake", 0, &args), 1, "mount fakefs failed");
 
     struct utsname name;
@@ -187,15 +195,14 @@ int setup_fakefs(uint32_t payload_options, struct paleinfo* pinfo_p) {
     copyfile_state_t state = copyfile_state_alloc();
     copyfile_state_set(state, COPYFILE_STATE_STATUS_CTX, &context);
     copyfile_state_set(state, COPYFILE_STATE_STATUS_CB, &copyfile_fakefs_cb);
-    
+
     CHECK_ERROR(copyfile("/cores/fs/real/.", "/cores/fs/fake", state, COPYFILE_ALL | COPYFILE_RECURSIVE | COPYFILE_NOFOLLOW_SRC | COPYFILE_NOFOLLOW_DST | COPYFILE_DATA_SPARSE | COPYFILE_DATA), 1, "copyfile() failed");
     printf("done copying files to fakefs\n");
     copyfile_state_free(state);
 
     int fd_fakefs = open("/cores/fs/fake", O_RDONLY | O_DIRECTORY);
     if (fd_fakefs == -1) {
-        fprintf(stderr, "cannot open fakefs fd\n");
-        spin();
+        panic("cannot open fakefs fd");
     }
 
     CHECK_ERROR(fs_snapshot_create(fd_fakefs, "orig-fs", 0), 1, "cannot create orig-fs snapshot on fakefs");

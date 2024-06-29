@@ -5,13 +5,14 @@
 #include <mach-o/loader.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <pthread.h>
+#include <libjailbreak/libjailbreak.h>
 #include <dlfcn.h>
 
 mach_port_t (*SBSSpringBoardServerPort)(void);
 static CFRunLoopRef loop;
 
-void sb_launched(CFNotificationCenterRef center, void *observer,
-				 CFStringRef name, const void *object, CFDictionaryRef info) {
+void sb_launched(CFNotificationCenterRef __unused center, void __unused *observer,
+				 CFStringRef __unused name, const void __unused *object, CFDictionaryRef __unused info) {
     CFRunLoopStop(loop);
 }
 
@@ -36,6 +37,10 @@ int launchdaemons(uint32_t payload_options, uint64_t pflags) {
         } else {
             fprintf(stderr, "failed to dlopen springboardservices\n");
         }
+    } else if (platform == PLATFORM_TVOS) {
+        xpc_object_t xreply = jailbreak_send_jailbreakd_command_with_reply_sync(JBD_CMD_REGISTER_PAYLOAD_PID);
+        xpc_release(xreply);
+        kill(getpid(), SIGSTOP);
     }
 
     if (pflags & palerain_option_safemode) {
@@ -57,23 +62,26 @@ int launchdaemons(uint32_t payload_options, uint64_t pflags) {
             if (notif) CFRelease(notif);
         }
     }
+    
+    if (access("/usr/bin/uicache", F_OK) == 0)
+        runCommand((char*[]){ "/usr/bin/uicache", "-a", NULL });
+    else if (access("/var/jb/usr/bin/uicache", F_OK) == 0)
+        runCommand((char*[]){ "/var/jb/usr/bin/uicache", "-a", NULL });
+    else if (platform != PLATFORM_BRIDGEOS)
+        runCommand((char*[]){ "/cores/binpack/usr/bin/uicache", "-a", NULL });
 
+    /* just in case the above commands are bad, we run them last so the user can still get the loader */
     switch (platform) {
         case PLATFORM_IOS:
             runCommand((char*[]){ "/cores/binpack/usr/bin/uicache", "-p", "/cores/binpack/Applications/palera1nLoader.app", NULL });
             break;
         case PLATFORM_TVOS:
+            runCommand((char*[]){ "/cores/binpack/usr/bin/uicache", "-p", "/cores/binpack/Applications/palera1nLoaderTV.app", NULL });
         case PLATFORM_BRIDGEOS:
             break;
         default:
             fprintf(stderr, "uicache_loader: unsupported platform\n");
     }
-
-    /* just in case these commands are bad, we run them last so the user can still get the loader */
-    if (access("/usr/bin/uicache", F_OK) == 0)
-        runCommand((char*[]){ "/usr/bin/uicache", "-a", NULL });
-    else if (access("/var/jb/usr/bin/uicache", F_OK) == 0)
-        runCommand((char*[]){ "/var/jb/usr/bin/uicache", "-a", NULL });
 
 
     printf("plooshInit launchdaemons: Goodbye!\n");

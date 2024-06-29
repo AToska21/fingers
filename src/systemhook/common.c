@@ -17,7 +17,7 @@ __API_AVAILABLE(macos(10.8), ios(6.0))
 int posix_spawnattr_getprocesstype_np(const posix_spawnattr_t * __restrict, int * __restrict);
 
 char *JB_SandboxExtensions = NULL;
-char *JB_RootPath = NULL;
+SHOOK_EXPORT char *JB_RootPath = NULL;
 SHOOK_EXPORT char *JB_PinfoFlags = NULL;
 SHOOK_EXPORT uint64_t pflags = 0;
 
@@ -84,10 +84,8 @@ int resolvePath(const char *file, const char *searchPath, int (^attemptHandler)(
 	char *bp;
 	char *cur;
 	char *p;
-	char **memp;
-	int lp;
-	int ln;
-	int cnt;
+	size_t lp;
+	size_t ln;
 	int err = 0;
 	int eacces = 0;
 	struct stat sb;
@@ -297,17 +295,10 @@ SHOOK_EXPORT int spawn_hook_common(pid_t *restrict pid, const char *restrict pat
 
 	kBinaryConfig binaryConfig = configForBinary(path, argv);
 
-#if 0
-	if (!(binaryConfig & kBinaryConfigDontProcess)) {
-		// jailbreakd: Upload binary to trustcache if needed
-		// jbdswProcessBinary(path);
-	}
-#endif
-
 	const char *existingLibraryInserts = envbuf_getenv((const char **)envp, "DYLD_INSERT_LIBRARIES");
 	__block bool systemHookAlreadyInserted = false;
 	if (existingLibraryInserts) {
-		enumeratePathString(existingLibraryInserts, ^(const char *existingLibraryInsert, bool *stop) {
+		enumeratePathString(existingLibraryInserts, ^(const char *existingLibraryInsert, bool __unused *stop) {
 			if (!strcmp(existingLibraryInsert, HOOK_DYLIB_PATH)) {
 				systemHookAlreadyInserted = true;
 			}
@@ -319,7 +310,7 @@ SHOOK_EXPORT int spawn_hook_common(pid_t *restrict pid, const char *restrict pat
     const char* existingLibrarySearchPaths = envbuf_getenv((const char **)envp, "DYLD_LIBRARY_PATH");
     __block bool librootDirectoryPathAlreadySearched = false;
     if (existingLibrarySearchPaths) {
-        enumeratePathString(existingLibrarySearchPaths, ^(const char *existingSearchPath, bool *stop) {
+        enumeratePathString(existingLibrarySearchPaths, ^(const char *existingSearchPath, bool __unused *stop) {
             if (!strcmp(existingSearchPath, LIBROOT_DYLIB_DIRECTORY_PATH)) {
                 librootDirectoryPathAlreadySearched = true;
             }
@@ -343,12 +334,6 @@ SHOOK_EXPORT int spawn_hook_common(pid_t *restrict pid, const char *restrict pat
 	if (envbuf_getenv((const char **)envp, "JB_TWEAKLOADER_PATH")) {
 		JBEnvAlreadyInsertedCount++;
 	}
-    
-    // This must be set to 0 because systemhook might not be of the same platform of the binary that will be ran
-    const char* existingDyldInCacheValue = envbuf_getenv((const char **)envp, "DYLD_IN_CACHE");
-    if (existingDyldInCacheValue && strcmp(existingDyldInCacheValue, "0") == 0) {
-        JBEnvAlreadyInsertedCount++;
-    }
 
 	// Check if we can find at least one reason to not insert jailbreak related environment variables
 	// In this case we also need to remove pre existing environment variables if they are already set
@@ -447,7 +432,6 @@ SHOOK_EXPORT int spawn_hook_common(pid_t *restrict pid, const char *restrict pat
 			envbuf_setenv(&envc, "JB_ROOT_PATH", JB_RootPath);
 			envbuf_setenv(&envc, "JB_PINFO_FLAGS", JB_PinfoFlags);
 			envbuf_setenv(&envc, "JB_TWEAKLOADER_PATH", JB_TweakLoaderPath);
-            envbuf_setenv(&envc, "DYLD_IN_CACHE", "0");
 		}
 		else {
 			if (systemHookAlreadyInserted && existingLibraryInserts) {
@@ -460,7 +444,7 @@ SHOOK_EXPORT int spawn_hook_common(pid_t *restrict pid, const char *restrict pat
 					newLibraryInsert[0] = '\0';
 
 					__block bool first = true;
-					enumeratePathString(existingLibraryInserts, ^(const char *existingLibraryInsert, bool *stop) {
+					enumeratePathString(existingLibraryInserts, ^(const char *existingLibraryInsert, bool __unused *stop) {
 						if (strcmp(existingLibraryInsert, HOOK_DYLIB_PATH) != 0) {
 							if (first) {
 								strcpy(newLibraryInsert, existingLibraryInsert);
@@ -486,7 +470,7 @@ SHOOK_EXPORT int spawn_hook_common(pid_t *restrict pid, const char *restrict pat
                     newLibrarySearchPaths[0] = '\0';
 
                     __block bool first = true;
-                    enumeratePathString(existingLibraryInserts, ^(const char *existingSearchPath, bool *stop) {
+                    enumeratePathString(existingLibraryInserts, ^(const char *existingSearchPath, bool __unused *stop) {
                         if (strcmp(existingSearchPath, LIBROOT_DYLIB_DIRECTORY_PATH) != 0) {
                             if (first) {
                                 strcpy(newLibrarySearchPaths, existingSearchPath);
@@ -508,7 +492,6 @@ SHOOK_EXPORT int spawn_hook_common(pid_t *restrict pid, const char *restrict pat
 			envbuf_unsetenv(&envc, "JB_SANDBOX_EXTENSIONS");
 			envbuf_unsetenv(&envc, "JB_ROOT_PATH");
             envbuf_unsetenv(&envc, "JB_PINFO_FLAGS");
-            envbuf_unsetenv(&envc, "DYLD_IN_CACHE");
 		}
 
 		int retval = pspawn_orig(pid, path, file_actions, attrp, argv, envc);

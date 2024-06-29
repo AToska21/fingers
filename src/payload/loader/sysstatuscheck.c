@@ -11,6 +11,10 @@
 #include <alloca.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <sys/kern_memorystatus.h>
+#include <sys/snapshot.h>
+#include <sys/mount.h>
+
+uint32_t dyld_get_active_platform(void);
 
 #define SB_PREF_PLIST_PATH "/var/mobile/Library/Preferences/com.apple.springboard.plist"
 #define CF_STRING_GET_CSTRING_PTR(cfStr, cPtr) do { \
@@ -96,7 +100,7 @@ int enable_non_default_system_apps(void) {
 
 }
 
-int remove_jailbreak_files(uint64_t pflags) {
+int  remove_jailbreak_files(uint64_t pflags) {
     removefile_state_t state = removefile_state_alloc();
     if (pflags & palerain_option_rootful) {
         printf("delete /var/lib\n");
@@ -132,7 +136,73 @@ int remove_jailbreak_files(uint64_t pflags) {
 }
 
 int fixup_databases(void);
-int sysstatuscheck(uint32_t payload_options, uint64_t pflags) {
+void revert_snapshot(void) {
+    char hash[97], snapshotName[150];
+    int ret = jailbreak_get_bmhash(hash);
+    if (ret) {
+        fprintf(stderr, "failed to get boot-manifest-hash\n");
+        return;
+    }
+    struct statfs fs;
+    ret = statfs("/", &fs);
+    if (ret) {
+        fprintf(stderr, "failed to stat root fs\n");
+        return;
+    }
+    
+    char* at_symbol = strstr(fs.f_mntfromname, "@");
+    char* device_name = at_symbol ? at_symbol + 1 : fs.f_mntfromname;
+    char* dirFdPath;
+    printf("device_name: %s\n", device_name);
+    if (at_symbol) {
+        // cba to look at the apfs unk_flags stuff
+        // It is known that unk_flags is set to 0x32000001 though
+        ret = runCommand((char*[]){ "/sbin/mount_apfs", "-o", "rw", device_name, "/cores/fs/real", NULL });
+
+        if (ret) {
+            fprintf(stderr, "mount_apfs failed: %d\n", ret);
+            return;
+        }
+        dirFdPath = "/cores/fs/real";
+    } else {
+        dirFdPath = "/";
+    }
+
+    snprintf(snapshotName, 150, "com.apple.os.update-%s", hash);
+    int dirfd = open(dirFdPath, O_RDONLY, 0);
+    ret = fs_snapshot_rename(dirfd, "orig-fs", snapshotName, 0);
+    if (ret != 0) {
+        fprintf(stderr, "could not rename snapshot: %d: (%s)\n", errno, strerror(errno));
+    } else {
+        printf("renamed snapshot\n");
+    }
+    ret = fs_snapshot_revert(dirfd, snapshotName, 0);
+    if (ret != 0) {
+        fprintf(stderr, "could not revert snapshot: %d: (%s)\n", errno, strerror(errno));
+    }
+    close(dirfd);
+    sync();
+    if (at_symbol) {
+        ret = unmount("/cores/fs/real", MNT_FORCE);
+        if (ret) {
+            fprintf(stderr, "unmount root live fs failed: %d (%s)\n", errno, strerror(errno));
+            return;
+        }
+    }
+    
+}
+
+void clean_fakefs(void) {
+    int dirfd = open("/", O_RDONLY);
+    int ret = fs_snapshot_revert(dirfd, "orig-fs", 0);
+    if (ret) {
+        fprintf(stderr, "could not revert snapshot: %d: (%s)\n", errno, strerror(errno));
+    }
+    close(dirfd);
+    return;
+}
+
+int sysstatuscheck(uint32_t __unused payload_options, uint64_t pflags) {
     printf("plooshInit sysstatuscheck...\n");
     int retval;
     memorystatus_memlimit_properties2_t mmprops;
@@ -142,15 +212,24 @@ int sysstatuscheck(uint32_t payload_options, uint64_t pflags) {
     }
 
     remount();
-    enable_non_default_system_apps();
+    if (dyld_get_active_platform() == PLATFORM_IOS) enable_non_default_system_apps();
     if (access("/private/var/dropbear_rsa_host_key", F_OK) != 0) {
         printf("generating ssh host key...\n");
         runCommand((char*[]){ "/cores/binpack/usr/bin/dropbearkey", "-f",  "/private/var/dropbear_rsa_host_key", "-t", "rsa", "-s", "4096", NULL });
     }
-    if ((pflags & palerain_option_force_revert)) remove_jailbreak_files(pflags);
+    if ((pflags & palerain_option_force_revert)) {
+        remove_jailbreak_files(pflags);
+        if ((pflags & (palerain_option_rootful | palerain_option_force_revert)) == (palerain_option_rootful | palerain_option_force_revert)) {
+            if ((pflags & (palerain_option_ssv)) == 0) {
+                revert_snapshot();
+            }
+        }
+    }
     if (pflags & palerain_option_rootful) {
         remove_bogus_var_jb();
         unlink("/var/jb");
+        FILE* f = fopen("/var/.keep_symlinks", "a");
+        if (f) fclose(f);
     } else {
         remove_bogus_var_jb();
         create_var_jb();

@@ -20,22 +20,24 @@ AR = ar
 endif
 ifeq ($(MAC),1)
 MACOSX_SYSROOT != xcrun -sdk macosx --show-sdk-path
-TARGET_SYSROOT != xcrun -sdk iphoneos --show-sdk-path
+TARGET_SYSROOT != xcrun -sdk appletvos --show-sdk-path
 CC != xcrun --find clang
+CXX != xcrun --find clang++
 else ifeq ($(UNAME),Darwin)
 CC = clang
+CXX = clang++
 MACOSX_SYSROOT ?= /usr/share/SDKs/MacOSX.sdk
-TARGET_SYSROOT ?= /usr/share/SDKs/iPhoneOS.sdk
+TARGET_SYSROOT ?= /usr/share/SDKs/AppleTVOS.sdk
 else
 VTOOL = cctools-vtool
 STRIP = cctools-strip
 AR = cctools-ar
 CC = clang
-CFLAGS += -target arm64-apple-ios
+CFLAGS += -target arm64-apple-tvos
 LD != command -v ld64
 LDFLAGS += "-fuse-ld=$(LD)"
 MACOSX_SYSROOT ?= $(HOME)/cctools/SDKs/MacOSX.sdk
-TARGET_SYSROOT ?= $(HOME)/cctools/SDKs/iPhoneOS.sdk
+TARGET_SYSROOT ?= $(HOME)/cctools/SDKs/AppleTVOS.sdk
 endif
 CFLAGS += -isystem $(ROOT)/apple-include -I$(ROOT)/include -isysroot $(TARGET_SYSROOT)
 OBJC = $(CC)
@@ -48,9 +50,13 @@ else
 SED = sed
 endif
 
-SUBDIRS = fakedyld rootlesshooks payload_dylib payload systemhook rootfulhooks universalhooks mount_cores ellekit
+LTO_TMP != mktemp -d
 
-export ROOT CC OBJC CFLAGS CC_FOR_BUILD HFSPLUS DMG NEWFS_HFS MAC UNAME SED SHELL LDFLAGS VTOOL STRIP DSYMUTIL LDID AR SUBDIRS
+LDFLAGS += -Wl,-object_path_lto,$(LTO_TMP)/lto.o
+
+SUBDIRS = fakedyld payload_dylib payload systemhook universalhooks mount_cores ellekit bridgehook
+
+export ROOT CC CXX OBJC CFLAGS CC_FOR_BUILD HFSPLUS DMG NEWFS_HFS MAC UNAME SED SHELL LDFLAGS VTOOL STRIP DSYMUTIL LDID AR SUBDIRS TARGET_SYSROOT
 
 all: binaries tools
 	$(MAKE) -C $(ROOT)/src ramdisk.dmg binpack.dmg
@@ -82,13 +88,17 @@ apple-include: apple-include-private/**
 	$(SED) -E s/'__IOS_PROHIBITED|__TVOS_PROHIBITED|__WATCHOS_PROHIBITED'//g < $(TARGET_SYSROOT)/usr/include/unistd.h > apple-include/unistd.h
 	$(SED) -E s/'__IOS_PROHIBITED|__TVOS_PROHIBITED|__WATCHOS_PROHIBITED'//g < $(TARGET_SYSROOT)/usr/include/mach/task.h > apple-include/mach/task.h
 	$(SED) -E s/'__IOS_PROHIBITED|__TVOS_PROHIBITED|__WATCHOS_PROHIBITED'//g < $(TARGET_SYSROOT)/usr/include/mach/mach_host.h > apple-include/mach/mach_host.h
+	$(SED) -E s/'__IOS_PROHIBITED|__TVOS_PROHIBITED|__WATCHOS_PROHIBITED'//g < $(TARGET_SYSROOT)/usr/include/mach/mach.h > apple-include/mach/mach.h
+	$(SED) -E s/'__IOS_PROHIBITED|__TVOS_PROHIBITED|__WATCHOS_PROHIBITED'//g < $(TARGET_SYSROOT)/usr/include/mach/message.h > apple-include/mach/message.h
 	$(SED) -E s/'__IOS_PROHIBITED|__TVOS_PROHIBITED|__WATCHOS_PROHIBITED'//g < $(TARGET_SYSROOT)/usr/include/ucontext.h > apple-include/ucontext.h
 	$(SED) -E s/'__IOS_PROHIBITED|__TVOS_PROHIBITED|__WATCHOS_PROHIBITED'//g < $(TARGET_SYSROOT)/usr/include/signal.h > apple-include/signal.h
+	$(SED) -E s/'__API_UNAVAILABLE(.*)'/';'/g < $(TARGET_SYSROOT)/usr/include/spawn.h > apple-include/spawn.h
 	$(SED) 's/#ifndef __OPEN_SOURCE__/#if 1\n#if defined(__has_feature) \&\& defined(__has_attribute)\n#if __has_attribute(availability)\n#define __API_AVAILABLE_PLATFORM_bridgeos(x) bridgeos,introduced=x\n#define __API_DEPRECATED_PLATFORM_bridgeos(x,y) bridgeos,introduced=x,deprecated=y\n#define __API_UNAVAILABLE_PLATFORM_bridgeos bridgeos,unavailable\n#endif\n#endif/g' < $(TARGET_SYSROOT)/usr/include/AvailabilityInternal.h > apple-include/AvailabilityInternal.h
 	$(SED) -E /'__API_UNAVAILABLE'/d < $(TARGET_SYSROOT)/usr/include/pthread.h > apple-include/pthread.h
 	@if [ -f $(TARGET_SYSROOT)/System/Library/Frameworks/CoreFoundation.framework/Headers/CFUserNotification.h ]; then $(SED) -E 's/API_UNAVAILABLE\(ios, watchos, tvos\)//g' < $(TARGET_SYSROOT)/System/Library/Frameworks/CoreFoundation.framework/Headers/CFUserNotification.h > apple-include/CoreFoundation/CFUserNotification.h; fi
 	$(SED) -i -E s/'__API_UNAVAILABLE\(.*\)'// apple-include/IOKit/IOKitLib.h
 	$(SED) -E -e s/'API_UNAVAILABLE\(.*\)'// -e 's/API_AVAILABLE\(macos\(10\.7\)\)/__OSX_AVAILABLE_STARTING\(__MAC_10_7, __IPHONE_5_0\)/g' < $(MACOSX_SYSROOT)/usr/include/xpc/connection.h > apple-include/xpc/connection.h
+	$(SED) -i 's|// __BLOCKS__|\n#include "$(TARGET_SYSROOT)/usr/include/bsm/audit.h"|' apple-include/xpc/connection.h
 	cp -a apple-include-private/. apple-include
 
 clean:

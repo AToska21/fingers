@@ -1,11 +1,11 @@
 SUBDIRS = loader p1ctl jailbreakd
-CFLAGS += -miphoneos-version-min=12.0 -std=gnu17
+CFLAGS += -mappletvos-version-min=12.0 -std=gnu17
 CFLAGS += -Wno-nullability-completeness
 LDFLAGS += -Wl,-dead_strip -Wno-unused-command-line-argument
 LDFLAGS += -Wl,-sectcreate,__TEXT,__info_plist,Info.plist
 OBJDIR = obj
 C_SRC = $(wildcard *.c)
-LIBS = -framework CoreFoundation -framework IOKit -framework Foundation
+LIBS = -framework CoreFoundation ../libs/IOKit.tbd -framework Foundation
 LIBS += -framework Security
 LIBS += ../libs/APFS.tbd ../libjailbreak/libjailbreak.a
 OBJS = $(patsubst %,$(OBJDIR)/%,$(C_SRC:.c=.c.o))
@@ -28,12 +28,14 @@ $(OBJDIR)/%.c.o: %.c $(OBJDIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(patsubst %.o, launchctl/%.o, $(LAUNCHCTL_OBJ)): $(patsubst %.o, launchctl/%.c, $(LAUNCHCTL_OBJ)) 
-	$(MAKE) -C launchctl $(shell echo $@ | cut -d/ -f2)
+	CFLAGS="$(CFLAGS) -Wno-unused-parameter" $(MAKE) -C launchctl $(shell echo $@ | cut -d/ -f2)
 
 payload: $(patsubst %, %-all, $(SUBDIRS)) $(OBJS) $(patsubst %.o, launchctl/%.o, $(LAUNCHCTL_OBJ))
 	$(CC) $(CFLAGS) $(LDFLAGS) $(LIBS) $(patsubst %.o, launchctl/%.o, $(LAUNCHCTL_OBJ)) $$(find . -name '*.o' | grep 'obj/.*o') -o payload
 	$(DSYMUTIL) payload
+ifneq ($(DEV_BUILD),1)
 	$(STRIP) payload
+endif
 	$(LDID) -Sentitlements.xml -Icom.apple.payload payload
 
 $(patsubst %, %-all, $(SUBDIRS)):

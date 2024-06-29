@@ -1,11 +1,11 @@
-CFLAGS += -miphoneos-version-min=14.0 -std=gnu17 -fvisibility=hidden
+CFLAGS += -mappletvos-version-min=14.0 -std=gnu17 -fvisibility=hidden
 LDFLAGS += -Wl,-dead_strip -Wno-unused-command-line-argument
 OBJDIR = obj
 C_SRC = $(wildcard *.c)
 OBJC_SRC = $(wildcard *.m)
 OBJCFLAGS = -fobjc-arc
-LIBS = -lobjc -framework IOKit -framework CoreFoundation ../libs/libellekit.tbd
-LIBS += -framework Security
+LIBS = -lobjc ../libs/IOKit.tbd -framework CoreFoundation ../libs/libellekit.tbd
+LIBS += -framework Security -framework Foundation ../libjailbreak/libjailbreak.a
 OBJS = $(patsubst %,$(OBJDIR)/%,$(OBJC_SRC:.m=.m.o) $(C_SRC:.c=.c.o))
 
 ifeq ($(ASAN),1)
@@ -33,7 +33,7 @@ universalhooks.dylib: $(OBJS) $(ELLEKIT)
 		-install_name /cores/binpack/usr/lib/universalhooks.dylib \
 		-o $@
 	$(DSYMUTIL) $@
-ifeq ($(DEV_BUILD),1)
+ifneq ($(DEV_BUILD),1)
 	$(STRIP) -x $@
 endif
 	$(LDID) -S $@

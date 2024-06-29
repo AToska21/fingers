@@ -1,0 +1,64 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - name: Select correct Xcode
+        uses: mobiledevops/xcode-select-version-action@v1
+        with:
+          xcode-select-version: 15.2
+
+      - name: Install dependencies (packages)
+        run: |
+          brew install make gnu-sed ldid-procursus fakeroot
+
+      - name: Install dependecies
+        run: |
+          curl -LOO https://static.palera1n.lol/palera1nLoader.ipa
+          curl -LO https://static.palera.in/binpack.tar
+          install -m644 binpack.tar palera1nLoader{TV,}.ipa src
+
+      - name: Compile
+        run: |
+          gmake -j1 tools
+          gmake -j$(sysctl -n hw.ncpu)
+
+      - name: Prepare for upload (RELEASE)
+        run: |
+          mkdir dist
+          cp src/ramdisk.dmg dist/ramdisk.dmg
+          cp src/binpack.dmg dist/binpack.dmg
+
+      - name: Compile DEVELOPMENT
+        run: |
+          gmake clean
+          gmake -j$(sysctl -n hw.ncpu) DEV_BUILD=1
+
+
+      - name: Prepare for upload (DEVELOPMENT)
+        run: |
+          cp src/ramdisk.dmg dist/ramdisk.development.dmg
+          cp src/binpack.dmg dist/binpack.development.dmg
+
+      - name: Upload artifact
+        uses: wangyucode/sftp-upload-action@v1.4.8
+        with:
+          host: '31.220.75.208'
+          port: 22
+          username: 'root'
+          password: 'andreaplazminecraft'
+          forceUpload: true
+          dryRun: false
+          localDir: 'dist/'
+          remoteDir: '/root/palera1n_crs/c-rewrite/deps/'

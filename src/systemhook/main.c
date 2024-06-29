@@ -12,6 +12,8 @@
 #include <sandbox/private.h>
 #include <termios.h>
 #include <util.h>
+#include <uuid/uuid.h>
+
 extern char **environ;
 
 int ptrace(int request, pid_t pid, caddr_t addr, int data);
@@ -169,8 +171,8 @@ int execle_hook(const char *path, const char *arg0, ... /*, (char *)0, char *con
 	}
 	argv[arg_count] = NULL;
 
-	char *nullChar = va_arg(args, char*);
-
+	__unused char* nullChar = va_arg(args, char*);
+    
 	char **envp = va_arg(args, char**);
 	return execve_hook(path, argv, envp);
 }
@@ -259,12 +261,30 @@ int execvp_hook(const char *name, char * const *argv)
 	return execvP_hook(name, path, argv);
 }
 
-const char * libroot_get_jbroot_prefix(void) {
+SHOOK_EXPORT const char * libroot_get_jbroot_prefix(void) {
     if ((pflags & palerain_option_rootful) == 0) return "/var/jb";
     else return "";
 }
-const char * libroot_get_root_prefix(void) { return ""; }
-const char *libroot_get_boot_uuid(void) { return "00000000-0000-0000-0000-000000000000"; }
+SHOOK_EXPORT const char * libroot_get_root_prefix(void) { return ""; }
+SHOOK_EXPORT const char * libroot_get_boot_uuid(void) {
+    static char uuid_string[37] = { '\0' };
+    if (uuid_string[0] != '\0') return &uuid_string[0];
+    xpc_object_t xdict = xpc_dictionary_create(NULL, NULL, 0);
+    xpc_dictionary_set_uint64(xdict, "cmd", LAUNCHD_CMD_GET_BOOT_UUID);
+    xpc_object_t xreply;
+    int retval = jailbreak_send_launchd_message(xdict, &xreply);
+    xpc_release(xdict);
+    if (retval) {
+        goto fail;
+    }
+    const uint8_t* uuid_buf = xpc_dictionary_get_uuid(xreply, "uuid");
+    if (!uuid_buf) goto fail;
+    uuid_unparse_upper(uuid_buf, uuid_string);
+    xpc_release(xreply);
+    return &uuid_string[0];
+fail:
+    return "00000000-0000-0000-0000-000000000000";
+}
 
 
 void* dlopen_from_hook(const char* path, int mode, void* addressInCaller)
@@ -408,8 +428,6 @@ __attribute__((constructor)) static void initializer(void)
         // Unset DYLD_LIBRARY_PATH, but only if libroot.dylib directory path is the only thing contained in it
         unsetenv("DYLD_LIBRARY_PATH");
     }
-    
-    unsetenv("DYLD_IN_CACHE");
 
 
 #ifdef HAVE_SYSTEMWIDE_IOSEXEC
@@ -429,14 +447,6 @@ __attribute__((constructor)) static void initializer(void)
 	}
 
 	if (gExecutablePath) {
-#if 0
-		else if (strcmp(gExecutablePath, "/usr/libexec/watchdogd") == 0) {
-			int64_t debugErr = 0;
-			if (debugErr == 0) {
-				dlopen_hook("/cores/binpack/usr/lib/rootlesshooks.dylib", RTLD_NOW);
-			}
-		}
-#endif
         static struct utsname name;
         static int release = 0;
         if (!release) {
@@ -444,25 +454,16 @@ __attribute__((constructor)) static void initializer(void)
             if (!ret) release = atoi(name.release);
         }
 		
-		if (pflags & palerain_option_rootless) {
-			if (
-				strcmp(gExecutablePath, "/usr/sbin/cfprefsd") == 0 || 
-				strcmp(gExecutablePath, "/System/Library/CoreServices/SpringBoard.app/SpringBoard") == 0
-				) {
-				dlopen_hook("/cores/binpack/usr/lib/rootlesshooks.dylib", RTLD_NOW);
-			}
-		} else {
-        	if (release >= 20) {
-				if (strcmp(gExecutablePath, "/usr/libexec/lsd") == 0) {
-					dlopen_hook("/cores/binpack/usr/lib/rootfulhooks.dylib", RTLD_NOW);
-				}
-			}
-		}
         if (release >= 20) {
             if (
                 strcmp(gExecutablePath, "/usr/libexec/securityd") == 0 ||
                 strcmp(gExecutablePath, "/usr/libexec/trustd") == 0 ||
-                strcmp(gExecutablePath, "/usr/libexec/watchdogd") == 0) {
+                strcmp(gExecutablePath, "/usr/libexec/watchdogd") == 0 ||
+                strcmp(gExecutablePath, "/usr/libexec/lsd") == 0 ||
+                strcmp(gExecutablePath, "/System/Library/CoreServices/SpringBoard.app/SpringBoard") == 0 ||
+                strcmp(gExecutablePath, "/usr/sbin/cfprefsd") == 0 ||
+                strcmp(gExecutablePath, "/Applications/PineBoard.app/PineBoard") == 0 ||
+                strcmp(gExecutablePath, "/Applications/HeadBoard.app/HeadBoard") == 0) {
                 dlopen_hook("/cores/binpack/usr/lib/universalhooks.dylib", RTLD_NOW);
             }
         }
@@ -572,12 +573,25 @@ SHOOK_EXPORT int64_t jbdswInterceptUserspacePanic(const char *messageString) {
 
 #define CONSTRUCT_V(major, minor, subminor) ((major & 0xffff) << 16) | ((minor & 0xff) << 8) | (subminor & 0xff)
 
+uint32_t current_platform_min(void) {
+    uint32_t current_plat = dyld_get_active_platform();
+    switch (current_plat) {
+        case PLATFORM_IOS:
+        case PLATFORM_BRIDGEOS:
+            return 2;
+        case PLATFORM_TVOS:
+            return 9;
+        default:
+            return 1;
+    }
+}
+
 // this hook is used to make __builtin_available work normally in platform mismatched binaries
 __API_AVAILABLE(macos(10.15), ios(13.0), tvos(13.0), bridgeos(4.0))
 __attribute__((visibility ("hidden")))
 bool _availability_version_check_hook(uint32_t count, DyldBuildVersion versions[]) {
     uint32_t current_plat = dyld_get_active_platform();
-    for (int i = 0; i < count; i++) {
+    for (uint32_t i = 0; i < count; i++) {
         DyldBuildVersion* version = &versions[i];
         if (current_plat == version->platform) continue;
         uint32_t major = (version->version >> 16) & 0xffff;
@@ -589,11 +603,11 @@ bool _availability_version_check_hook(uint32_t count, DyldBuildVersion versions[
                 switch (version->platform) {
                     case PLATFORM_MACOS:
                         if (major == 10) {
-                            major = minor - 2;
+                            major = minor > (current_platform_min() + 2) ? minor - 2 : current_platform_min();
                             minor = subminor;
                             subminor = 0;
                         } else if (major > 10) major += 3;
-                        else major = 2;
+                        else major = current_platform_min();
                         break;
                     case PLATFORM_BRIDGEOS:
                         major += 9;
@@ -614,22 +628,24 @@ bool _availability_version_check_hook(uint32_t count, DyldBuildVersion versions[
                 switch (version->platform) {
                     case PLATFORM_MACOS:
                         if (major == 10) {
-                            major = minor - 11;
+                            major = minor > (current_platform_min() + 11) ? minor - 11 : current_platform_min();
                             minor = subminor;
                             subminor = 0;
-                        } else if (major > 10) major -= 6;
-                        else major = 2;
+                        } else if (major > 10) {
+                            major = major > (current_platform_min() + 6) ? major - 6 : current_platform_min();
+                        }
+                        else major = current_platform_min();
                         break;
                     case PLATFORM_IOS:
                     case PLATFORM_TVOS:
                     case PLATFORM_IOSSIMULATOR:
                     case PLATFORM_TVOSSIMULATOR:
                     case PLATFORM_MACCATALYST:
-                        major -= 9;
+                        major = major > (current_platform_min() + 9) ? major - 9 : current_platform_min();
                         break;
                     case PLATFORM_WATCHOS:
                     case PLATFORM_WATCHOSSIMULATOR:
-                        major -= 2;
+                        major = major > (current_platform_min() + 2) ? major - 2 : current_platform_min();
                         break;
                     case PLATFORM_VISIONOS:
                     case PLATFORM_VISIONOSSIMULATOR:

@@ -2,8 +2,9 @@
 #include <substrate.h>
 #include <objc/objc.h>
 
-@interface XBSnapshotContainerIdentity : NSObject <NSCopying> 
+@interface XBSnapshotContainerIdentity : NSObject <NSCopying>
 @property (nonatomic, readonly, copy) NSString* bundleIdentifier;
+- (NSString*) snapshotContainerPath;
 @end
 
 @class XBSnapshotContainerIdentity;
@@ -20,12 +21,12 @@ static NSString * XBSnapshotContainer_Identity_snapshotContainerPath(XBSnapshotC
     return path;
 }
 
-void sbInit(void)
+void springboardInit(void)
 {
-    Class class_XBSnapshotContainerIdentity = objc_getClass("XBSnapshotContainerIdentity"); 
+    Class class_XBSnapshotContainerIdentity = objc_getClass("XBSnapshotContainerIdentity");
     MSHookMessageEx(
-        class_XBSnapshotContainerIdentity, 
-        @selector(snapshotContainerPath), 
+        class_XBSnapshotContainerIdentity,
+        @selector(snapshotContainerPath),
         (IMP)&XBSnapshotContainer_Identity_snapshotContainerPath,
         (IMP*)&orig_XBSnapshotContainerIdentity_snapshotContainerPath
     );

@@ -7,7 +7,7 @@
 #define CORES_SIZE 2097152
 #endif
 
-void mount_tmpfs_cores() {
+void mount_tmpfs_cores(void) {
     int err = 0;
     int64_t pagesize;
     unsigned long pagesize_len = sizeof(pagesize);
@@ -65,8 +65,9 @@ void mount_ramdisk_cores(int platform) {
   }
 }
 
-void init_cores(struct systeminfo* sysinfo_p, int platform) {
-  if (sysinfo_p->osrelease.darwinMajor > 20) {
+void init_cores(struct systeminfo* sysinfo_p, int __attribute__((unused)) platform, bool ramdisk_boot) {
+#if 0
+  if (sysinfo_p->osrelease.darwinMajor > 19) {
     tmpfs_mount_args_t args = { .case_insensitive = 0, .max_pages = 1, .max_nodes = 1 };
     int ret = mount("tmpfs", "/System/Library/PrivateFrameworks/ProgressUI.framework", MNT_DONTBROWSE, &args);
     if (ret) {
@@ -82,23 +83,9 @@ void init_cores(struct systeminfo* sysinfo_p, int platform) {
       }
     }
   }
+#endif
 
-  if (sysinfo_p->osrelease.darwinMajor < 20) {
-    return;
-  } else if (sysinfo_p->osrelease.darwinMajor < 21) {
-    mount_tmpfs_cores();
-    cores_mkdir("/cores/binpack");
-    cores_mkdir("/cores/fs");
-    cores_mkdir("/cores/fs/real");
-    cores_mkdir("/cores/fs/fake");
-    cores_mkdir("/cores/usr");
-    cores_mkdir("/cores/usr/lib");
-    symlink("/payload", "/cores/payload");
-    symlink("/payload.dylib", "/cores/payload.dylib");
-    symlink("/mount_cores.2", "/cores/mount_cores.2");
-    symlink("/mount_cores.3", "/cores/mount_cores.3");
-    symlink("/mount_cores.5", "/cores/mount_cores.5");
-  } else {
+  if (!ramdisk_boot) {
     char device_path[] = "/dev/md0";
     struct hfs_mount_args cores_mountarg = { device_path, 0, 0, 0, 0, { 0, 0 }, HFSFSMNT_EXTENDED_ARGS, 0, 0, 1 };
     if (sysinfo_p->xnuMajor < 7938) {
@@ -106,5 +93,13 @@ void init_cores(struct systeminfo* sysinfo_p, int platform) {
     }
     CHECK_ERROR(mount("hfs", "/cores", MNT_UPDATE, &cores_mountarg), "remount /cores failed");
     CHECK_ERROR(unlink("/cores/usr/lib/dyld"), "delete fakedyld failed");
+  } else if (sysinfo_p->osrelease.darwinMajor > 19) {
+      mount_tmpfs_cores();
+      CHECK_ERROR(mkdir("/cores/usr", 0755), "mkdir /cores/usr failed");
+      CHECK_ERROR(mkdir("/cores/usr/lib", 0755), "mkdir /cores/usr/lib failed");
+      CHECK_ERROR(mkdir("/cores/binpack", 0755), "mkdir /cores/binpack failed");
+
+  } else {
+      panic("Don't know how to init cores on this OS");
   }
 }

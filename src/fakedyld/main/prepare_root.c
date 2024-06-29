@@ -18,7 +18,8 @@ void prepare_rootfs(struct systeminfo* sysinfo_p, struct paleinfo* pinfo_p) {
     LOG("mounting realfs %s\n", real_rootdev);
     struct apfs_mount_args arg = {
         real_rootdev,
-        MNT_RDONLY, APFS_MOUNT_FILESYSTEM /* "bdevvp failed: open" kernel panic when mount snapshot */, 0
+        MNT_RDONLY, APFS_MOUNT_FILESYSTEM /* "bdevvp failed: open" kernel panic when mount snapshot */
+        , 0, 0, { "" }, NULL, 0, 0, NULL, 0, 0, 0, 0, 0, 0
     };
     ret = mount("apfs", "/cores/fs/real", MNT_RDONLY, &arg);
     if (ret) {
@@ -32,6 +33,7 @@ void prepare_rootfs(struct systeminfo* sysinfo_p, struct paleinfo* pinfo_p) {
     fbi("/System/Library/Assistant", "/cores/fs/real/System/Library/Assistant");
     fbi("/System/Library/Audio", "/cores/fs/real/System/Library/Audio");
     fbi("/System/Library/Fonts", "/cores/fs/real/System/Library/Fonts");
+    fbi("/System/Library/Frameworks", "/cores/fs/real/System/Library/Frameworks");
     fbi("/System/Library/Health", "/cores/fs/real/System/Library/Health");
     fbi("/System/Library/LinguisticData", "/cores/fs/real/System/Library/LinguisticData");
     fbi("/System/Library/OnBoardingBundles", "/cores/fs/real/System/Library/OnBoardingBundles");

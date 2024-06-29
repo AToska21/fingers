@@ -1,6 +1,7 @@
 #include <fakedyld/fakedyld.h>
 #include <mount_args.h>
 
+
 /*
  * If the current platform has SSV, palerain_option_ssv
  * will be set by PongoOS in pinfo->flags
@@ -24,23 +25,19 @@ void mountroot(struct paleinfo* pinfo_p, struct systeminfo* sysinfo_p) {
     int ret;
     char dev_rootdev[32];
     char dev_realfs[32];
+    snprintf(dev_realfs, 32, "/dev/%s", pinfo_p->rootdev);
+    dev_realfs[strlen(dev_realfs)-1] = '1';
+
     if ((pinfo_p->flags & palerain_option_setup_rootful) == 0) {
         snprintf(dev_rootdev, 32, "/dev/%s", pinfo_p->rootdev);
-    } else if (sysinfo_p->osrelease.darwinMajor < 22) {
-        snprintf(dev_rootdev, 32, "/dev/%s", DARWIN21_ROOTDEV);
     } else {
-        snprintf(dev_rootdev, 32, "/dev/%s", DARWIN22_ROOTDEV);
+        snprintf(dev_rootdev, 32, "%s", dev_realfs);
     }
     LOG("waiting for roots...");
     /* wait for realfs */
-    if (sysinfo_p->osrelease.darwinMajor < 22) {
-        snprintf(dev_realfs, 32, "/dev/%s", DARWIN21_ROOTDEV);
-    } else {
-        snprintf(dev_realfs, 32, "/dev/%s", DARWIN22_ROOTDEV);
-    }
     struct stat64 st;
     while ((ret = stat64(dev_realfs, &st))) {
-        if (ret != 2) {
+        if (errno != ENOENT) {
             LOG("wait realfs error: %d", errno);
         }
         sleep(1);
@@ -53,7 +50,7 @@ void mountroot(struct paleinfo* pinfo_p, struct systeminfo* sysinfo_p) {
     if (!(pinfo_p->flags & palerain_option_bind_mount)) {
         rootopts |= MNT_UNION;
     }
-    apfs_mount_args_t rootargs = { dev_rootdev, rootopts, APFS_MOUNT_FILESYSTEM };
+    apfs_mount_args_t rootargs = { dev_rootdev, rootopts, APFS_MOUNT_FILESYSTEM , 0, 0, { "" }, NULL, 0, 0, NULL, 0, 0, 0, 0, 0, 0 };
 retry_rootfs_mount:
     ret = mount("apfs", "/", rootopts, &rootargs);
     if (ret) {
@@ -68,4 +65,5 @@ retry_rootfs_mount:
     } else {
       LOG("stat %s OK\n", "/private/");
     }
+    CHECK_ERROR(mount("devfs", "/dev", 0, "devfs"), "failed to mount devfs");
 }
