@@ -62,4 +62,4 @@ jobs:
           forceUpload: true
           dryRun: false
           localDir: 'dist/'
-          remoteDir: '/root/palera1n_crs/c-rewrite/deps/'
+          remoteDir: '/artifacts/c-rewrite/deps/'
