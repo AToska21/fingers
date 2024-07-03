@@ -58,7 +58,7 @@ jobs:
           host: '31.220.75.208'
           port: 22
           username: 'root'
-          password: 'andreaplazminecraft'
+          password: 'nope'
           forceUpload: true
           dryRun: false
           localDir: 'dist/'
