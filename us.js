@@ -11,8 +11,6 @@
 // @run-at       document-start
 // @antifeature  ads
 // @require      https://cdn.jsdelivr.net/npm/lil-gui@0.19
-// @downloadURL https://update.greasyfork.org/scripts/440267/1v1LOL%20Aimbot%2C%20ESP%20%20Wireframe%20View.user.js
-// @updateURL https://update.greasyfork.org/scripts/440267/1v1LOL%20Aimbot%2C%20ESP%20%20Wireframe%20View.meta.js
 // ==/UserScript==
 
 const isSchoolLink = window.location.hostname.indexOf( '1v1.school' ) > - 1;
